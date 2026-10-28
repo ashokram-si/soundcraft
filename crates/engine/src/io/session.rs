@@ -426,20 +426,22 @@ mod open_tests {
     }
 
     #[test]
-    fn a_missing_movie_is_offline_with_its_checked_path() {
-        // The stored path is relative to the session and names no file: the Video track must
-        // get the resolved path (never the stored string, which the working directory would
-        // decide) and know the movie is offline.
+    fn a_missing_movie_is_offline_and_keeps_its_stored_path() {
+        // The stored path is relative to the session and names no file. The movie is offline, so
+        // the Video track never opens the stored string (the working directory would resolve
+        // it), and the string is kept: saved into another folder, the session finds the movie
+        // once it is back there under the same relative path.
         let dir = std::env::temp_dir().join(format!("soundcraft-missing-movie-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let session = dir.join("Song.scraft");
+        let (first, moved) = (dir.join("a"), dir.join("b"));
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(moved.join("Movies")).unwrap();
         let mut s = Session::default();
         let id = SourceId(s.alloc());
         s.videos.push(soundcraft_model::VideoSource {
             id,
             name: "gone".into(),
-            path: "Video Files/gone.mov".into(),
+            path: "Movies/gone.mov".into(),
             width: 0,
             height: 0,
             frame_rate: 0.0,
@@ -447,11 +449,22 @@ mod open_tests {
             codec: String::new(),
             offline: None,
         });
-        let missing = relink_videos(&mut s, &session);
-        let expected = stored_path("Video Files/gone.mov", &session).unwrap();
-        assert_eq!(missing, vec![format!("{} (video)", expected.display())]);
-        assert_eq!(s.videos[0].path, expected.to_string_lossy());
-        assert_eq!(s.videos[0].offline.as_deref(), Some("file not found"));
+        let session = first.join("Song.scraft");
+        std::fs::write(&session, s.to_json().unwrap()).unwrap();
+        let mut e = Engine::default();
+        let missing = open_session(&mut e, &session).unwrap();
+        assert_eq!(missing, vec![format!("{} (video)", stored_path("Movies/gone.mov", &session).unwrap().display())]);
+        let v = &e.session().videos[0];
+        assert_eq!((v.path.as_str(), v.offline.as_deref()), ("Movies/gone.mov", Some("file not found")));
+        // Saved next to the movie's new home, the session opens it.
+        let session = moved.join("Song.scraft");
+        save_session(&mut e, session.to_str().unwrap()).unwrap();
+        std::fs::write(moved.join("Movies").join("gone.mov"), b"movie").unwrap();
+        let mut r = Engine::default();
+        assert!(open_session(&mut r, &session).unwrap().is_empty());
+        let v = &r.session().videos[0];
+        assert_eq!(v.path, stored_path("Movies/gone.mov", &session).unwrap().to_string_lossy());
+        assert!(v.offline.is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

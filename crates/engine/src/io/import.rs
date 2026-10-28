@@ -195,11 +195,11 @@ pub fn relink_videos(s: &mut Session, session: &Path) -> Vec<String> {
             .find(|c| !name.as_os_str().is_empty() && file_found(c));
         match (near, p) {
             (Some(c), _) => v.path = c.to_string_lossy().into_owned(),
-            // The movie is gone: keep the checked path, never the stored string, and say so, so
-            // the Video track shows it as offline instead of opening the path as given.
+            // The movie is gone: mark it offline, so the Video track never opens the stored
+            // string (which the working directory would resolve). The string itself is kept as
+            // stored, so saving does not swap a path relative to the session for this folder's.
             (None, Ok(p)) => {
                 missing.push(format!("{} (video)", p.display()));
-                v.path = p.to_string_lossy().into_owned();
                 v.offline = Some("file not found".into());
             }
             (None, Err(why)) => {
