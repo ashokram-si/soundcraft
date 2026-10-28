@@ -424,6 +424,36 @@ mod open_tests {
         assert!(r.session().pool.get(r.session().sources[0].id).is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn a_missing_movie_is_offline_with_its_checked_path() {
+        // The stored path is relative to the session and names no file: the Video track must
+        // get the resolved path (never the stored string, which the working directory would
+        // decide) and know the movie is offline.
+        let dir = std::env::temp_dir().join(format!("soundcraft-missing-movie-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let session = dir.join("Song.scraft");
+        let mut s = Session::default();
+        let id = SourceId(s.alloc());
+        s.videos.push(soundcraft_model::VideoSource {
+            id,
+            name: "gone".into(),
+            path: "Video Files/gone.mov".into(),
+            width: 0,
+            height: 0,
+            frame_rate: 0.0,
+            duration: 0.0,
+            codec: String::new(),
+            offline: None,
+        });
+        let missing = relink_videos(&mut s, &session);
+        let expected = stored_path("Video Files/gone.mov", &session).unwrap();
+        assert_eq!(missing, vec![format!("{} (video)", expected.display())]);
+        assert_eq!(s.videos[0].path, expected.to_string_lossy());
+        assert_eq!(s.videos[0].offline.as_deref(), Some("file not found"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(all(test, unix))]
