@@ -1,7 +1,7 @@
 //! Crash-recovery copies of open sessions, one folder each, written in the background, and the
 //! recovery of the ones left behind with unsaved work.
 
-use crate::io::{Recording, open_session_linked, sanitize_name};
+use crate::io::{Recording, open_session_linked, sanitize_name, take_part};
 use crate::{Engine, EngineError, Result};
 use soundcraft_audio_io::{BitDepth, EncodeOptions, FileFormat};
 use soundcraft_model::{Session, SourceAudio, SourceId};
@@ -331,8 +331,10 @@ pub fn recover(e: &mut Engine, left: &Leftover) -> Result<Vec<String>> {
 }
 
 /// The takes of the recording `left` holds the plan of, repaired, minus those already in `s`.
-/// A take the plan names that isn't a take file SoundCraft recorded, in a folder it records into,
-/// is left untouched and added to `skipped`.
+/// A take that filled its first file goes on in the next ones ([`take_part`]): all of them are
+/// taken, in order, up to the first that holds nothing. A take file the plan names that isn't a
+/// take SoundCraft recorded, in a folder it records into, is left untouched and added to
+/// `skipped`, and ends its take there.
 fn unfinished_takes(left: &Leftover, s: &Session, skipped: &mut Vec<String>) -> Option<(Recording, Vec<(soundcraft_model::TrackId, PathBuf)>)> {
     let plan: Recording = serde_json::from_str(&std::fs::read_to_string(left.dir.join(RECORDING)).ok()?).ok()?;
     let known: Vec<PathBuf> =
@@ -340,15 +342,19 @@ fn unfinished_takes(left: &Leftover, s: &Session, skipped: &mut Vec<String>) -> 
     let folders = take_folders(left);
     let mut takes = Vec::new();
     for t in &plan.takes {
-        if std::fs::canonicalize(&t.path).is_ok_and(|p| known.contains(&p)) {
-            continue;
-        }
-        match repair_take(&t.path, &folders, t.channels, plan.rate) {
-            Ok(frames) if frames > 0 => takes.push((t.track, t.path.clone())),
-            Ok(_) => {}
-            Err(err) => {
-                log::warn!("recovery skipped the take {}: {err}", t.path.display());
-                skipped.push(format!("{}: {err}", t.path.display()));
+        let parts = (2..).map(|n| take_part(&t.path, n)).take_while(|p| p.exists());
+        for path in std::iter::once(t.path.clone()).chain(parts) {
+            if std::fs::canonicalize(&path).is_ok_and(|p| known.contains(&p)) {
+                continue;
+            }
+            match repair_take(&path, &folders, t.channels, plan.rate) {
+                Ok(frames) if frames > 0 => takes.push((t.track, path)),
+                Ok(_) => break,
+                Err(err) => {
+                    log::warn!("recovery skipped the take {}: {err}", path.display());
+                    skipped.push(format!("{}: {err}", path.display()));
+                    break;
+                }
             }
         }
     }
@@ -623,6 +629,33 @@ mod tests {
         let mut again = Engine::default();
         recover(&mut again, &leftovers(&root)[0]).unwrap();
         assert_eq!((clips(&again), again.session().sources.len()), (vec![(48_000, 480)], 1), "placed once");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A take that went on in more files before the crash is placed whole: the full files as they
+    /// are, the last one repaired, end to end.
+    #[test]
+    fn a_take_in_several_files_at_a_crash_is_placed_whole_on_recovery() {
+        use crate::io::Take;
+        let dir = folder("autosave-take-files");
+        let root = dir.join("Autosave");
+        let mut e = Engine::default();
+        let track =
+            soundcraft_model::TrackId(e.execute("track.new", &json!({"name": "Vox", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap());
+        let take = root.join(sanitize_name(&e.session().name)).join("Audio Files/Vox_01.wav");
+        std::fs::create_dir_all(take.parent().unwrap()).unwrap();
+        let audio = |n: usize| (0..n).flat_map(|i| (i as f32 / 1000.0).to_le_bytes()).collect::<Vec<u8>>();
+        std::fs::write(&take, [soundcraft_audio_io::wav_float_header(1, 48_000, 300).unwrap(), audio(300)].concat()).unwrap();
+        std::fs::write(take_part(&take, 2), [soundcraft_audio_io::wav_float_header(1, 48_000, 300).unwrap(), audio(300)].concat()).unwrap();
+        std::fs::write(take_part(&take, 3), [soundcraft_audio_io::wav_float_header(1, 48_000, 100).unwrap(), audio(250)].concat()).unwrap();
+        let plan = Recording { start: 48_000, pass: None, punch: None, rate: 48_000, takes: vec![Take { track, path: take, channels: 1 }] };
+        let w = Autosaver::new(root.clone());
+        w.write(e.session_arc(), None, Some(plan));
+        drop(w);
+        let mut r = Engine::default();
+        recover(&mut r, &leftovers(&root)[0]).unwrap();
+        let clips: Vec<_> = r.session().track(track).unwrap().clips().iter().map(|c| (c.name.clone(), c.start, c.length)).collect();
+        assert_eq!(clips, [("Vox_01".into(), 48_000, 300), ("Vox_01-2".into(), 48_300, 300), ("Vox_01-3".into(), 48_600, 250)]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
