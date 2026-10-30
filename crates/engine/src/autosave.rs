@@ -385,7 +385,7 @@ fn repair_take(path: &Path, folders: &[PathBuf], channels: usize, rate: u32) -> 
     let expected = header(0)?;
     let mut f = std::fs::OpenOptions::new().read(true).write(true).open(path)?;
     let mut head = vec![0u8; expected.len()];
-    if std::io::Read::read_exact(&mut f, &mut head).is_err() || !is_take_header(&head, &expected) {
+    if std::io::Read::read_exact(&mut f, &mut head).is_err() || !is_take_header(&head, channels, rate) {
         return Err(refuse("not a take SoundCraft recorded"));
     }
     let audio = f.metadata()?.len().saturating_sub(expected.len() as u64);
@@ -396,22 +396,23 @@ fn repair_take(path: &Path, folders: &[PathBuf], channels: usize, rate: u32) -> 
     Ok(frames)
 }
 
-/// `head` is a take header like `expected` (the recorder's header for no frames yet): RIFF or
-/// RF64 WAVE, the same format chunk at the same place, and the data chunk right after it all.
-/// Only the sizes and frame counts may differ.
-fn is_take_header(head: &[u8], expected: &[u8]) -> bool {
-    let magic = matches!(head.get(..4), Some(b"RIFF" | b"RF64")) && head.get(8..12) == Some(b"WAVE");
-    let fmt = expected.windows(4).position(|w| w == b"fmt ");
-    let fmt_len = fmt.and_then(|at| expected.get(at + 4..at + 8)).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes);
-    let same_fmt = match (fmt, fmt_len) {
-        (Some(at), Some(n)) => {
-            let end = at.saturating_add(8).saturating_add(n as usize);
-            expected.get(at..end).is_some_and(|chunk| head.get(at..end) == Some(chunk))
+/// `head` is a header the recorder writes for a take of `channels` at `rate`: exactly the one
+/// for the frame count its data chunk claims, RIFF or RF64. The recorder rewrites only the sizes
+/// and frame counts as the take grows, so a WAV with anything else in the header (its own
+/// metadata in the reserved chunk, another chunk, another format) isn't a take.
+fn is_take_header(head: &[u8], channels: usize, rate: u32) -> bool {
+    let data_len = match head.get(..4) {
+        Some(b"RIFF") => {
+            head.len().checked_sub(4).and_then(|at| head.get(at..)).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes).map(u64::from)
         }
-        _ => false,
+        Some(b"RF64") => head.get(28..36).and_then(|b| b.try_into().ok()).map(u64::from_le_bytes),
+        _ => None,
     };
-    let data = expected.len().checked_sub(8).and_then(|at| head.get(at..at + 4)) == Some(b"data");
-    magic && same_fmt && data
+    let block = channels as u64 * 4;
+    data_len
+        .filter(|n| block > 0 && n % block == 0)
+        .and_then(|n| soundcraft_audio_io::wav_float_header(channels, rate, n / block).ok())
+        .is_some_and(|written| written == head)
 }
 
 /// Delete a leftover autosave.
@@ -671,8 +672,15 @@ mod tests {
         std::fs::create_dir_all(&takes).unwrap();
         let wav = [soundcraft_audio_io::wav_float_header(1, 48_000, 0).unwrap(), vec![0; 4_000]].concat();
         let text = b"not audio at all, but long enough to be mistaken for a header if nobody looked at it ......".repeat(4);
-        let files =
-            [(takes.join("notes.wav"), text.clone()), (dir.join("Elsewhere/Vox_01.wav"), wav.clone()), (takes.join("../Vox_02.wav"), wav.clone())];
+        // another app's WAV with its own metadata where the recorder reserves room, chunk sizes unchanged
+        let mut tagged = wav.clone();
+        tagged[12..48].copy_from_slice(b"LIST\x1c\0\0\0INFOISFT\x10\0\0\0another recorder");
+        let files = [
+            (takes.join("notes.wav"), text.clone()),
+            (dir.join("Elsewhere/Vox_01.wav"), wav.clone()),
+            (takes.join("../Vox_02.wav"), wav.clone()),
+            (takes.join("Vox_04.wav"), tagged),
+        ];
         for (path, bytes) in &files {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, bytes).unwrap();
@@ -704,6 +712,25 @@ mod tests {
             assert_eq!(&std::fs::read(path).unwrap(), bytes, "{} untouched", path.display());
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_take_header_is_one_the_recorder_writes_for_its_frames() {
+        let header = |frames| soundcraft_audio_io::wav_float_header(2, 48_000, frames).unwrap();
+        for frames in [0, 1, 48_000, 1 << 31] {
+            assert!(is_take_header(&header(frames), 2, 48_000), "{frames} frames");
+        }
+        assert!(header(1 << 31).starts_with(b"RF64"));
+        assert!(!is_take_header(&header(10), 1, 48_000));
+        assert!(!is_take_header(&header(10), 2, 44_100));
+        let mut odd = header(10);
+        let at = odd.len() - 4;
+        odd[at..].copy_from_slice(&79u32.to_le_bytes());
+        assert!(!is_take_header(&odd, 2, 48_000), "a data size that isn't whole frames");
+        let mut fact = header(10);
+        let at = fact.len() - 12;
+        fact[at..at + 4].copy_from_slice(&11u32.to_le_bytes());
+        assert!(!is_take_header(&fact, 2, 48_000), "a frame count the data doesn't hold");
     }
 
     #[test]
