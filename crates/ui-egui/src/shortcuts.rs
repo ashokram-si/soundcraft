@@ -61,11 +61,12 @@ pub enum KeyEquivalentInput {
 /// The input egui-winit would have made from the key-down that a menu key equivalent took
 /// (AppKit runs key equivalents before the window sees the key), so shortcuts and text fields
 /// behave as they do without the menu bar: ⌘X and ⌘C are Cut and Copy and ⌘V a paste, as
-/// egui-winit makes them; any other chord is its press and its release, as egui-winit sends no
-/// release for a press it never saw, and a key egui still holds makes the next press a repeat,
-/// which [`handle`] ignores.
+/// egui-winit makes them; any other chord, ⌃ included (⌘⌃X is Cut Clip Gain), is its press and
+/// its release, as egui-winit sends no release for a press it never saw, and a key egui still
+/// holds makes the next press a repeat, which [`handle`] ignores.
 pub fn key_equivalent_input(key: Key, modifiers: Modifiers) -> KeyEquivalentInput {
-    if modifiers.command_only() {
+    // egui's `command_only` lets Control through: only the bare ⌘ chord is a clipboard command.
+    if modifiers.command_only() && !modifiers.ctrl {
         match key {
             Key::X => return KeyEquivalentInput::Events(vec![egui::Event::Cut]),
             Key::C => return KeyEquivalentInput::Events(vec![egui::Event::Copy]),
@@ -539,6 +540,11 @@ mod tests {
         let alt = Modifiers { alt: true, ..MAC_CMD };
         let alt_v = |pressed| egui::Event::Key { key: Key::V, physical_key: Some(Key::V), pressed, repeat: false, modifiers: alt };
         assert_eq!(key_equivalent_input(Key::V, alt), KeyEquivalentInput::Events(vec![alt_v(true), alt_v(false)]));
+        // ⌘⌃X is no Cut: it goes to egui as its press and release, which run Cut Clip Gain.
+        let ctrl = Modifiers { ctrl: true, ..MAC_CMD };
+        let ctrl_x = |pressed| egui::Event::Key { key: Key::X, physical_key: Some(Key::X), pressed, repeat: false, modifiers: ctrl };
+        assert_eq!(key_equivalent_input(Key::X, ctrl), KeyEquivalentInput::Events(vec![ctrl_x(true), ctrl_x(false)]));
+        assert_eq!(command_for(Key::X, ctrl, true), Some("edit.cut_clip_gain"));
     }
 
     /// A key equivalent pressed twice runs its shortcut twice: egui must see each press released,
