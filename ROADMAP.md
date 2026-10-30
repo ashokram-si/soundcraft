@@ -36,7 +36,7 @@ Detail: [target-app-parity.md](docs/target-app-parity.md#readiness-by-audience).
 **Why pre-alpha:** the core-workflow gate in [docs/roadmap.md](docs/roadmap.md#alpha-gate) fails.
 Editing, mixing, bouncing, and saving and reopening work end to end. But a Pro Tools user can't
 record from a chosen audio interface at a chosen buffer size (only the default devices, a fixed
-512-sample block, and takes held in RAM). They can't record MIDI from a keyboard (there is no
+512-sample block). They can't record MIDI from a keyboard (there is no
 MIDI device layer). And they can't bring a session in or hand one back (no AAF/OMF/`.ptx`).
 Readiness (~40 %) sits right at the alpha bar, but a gate failure keeps the app pre-alpha. The
 2026-10-07 estimate ("~65 % overall, 110–150 h to 100 %") counted feature presence. This one
@@ -102,7 +102,7 @@ Other languages shipped: 0. Detail: [localization-parity.md](docs/localization-p
 
 Ranked; the alpha gate, the alpha checklist and the beta plan are in [docs/roadmap.md](docs/roadmap.md).
 
-1. **Alpha blocker:** audio interfaces: device and buffer-size choice, duplex stream, ASIO; record to disk (G-01, G-06). 35–55 h.
+1. **Alpha blocker:** audio interfaces: device and buffer-size choice, duplex stream, ASIO (G-01). 35–55 h.
 2. **Alpha blocker:** MIDI devices: record from keyboards, play instruments live, output (G-02). 20–35 h.
 3. **Alpha blocker:** AAF/OMF import and export (G-03). 50–90 h.
 4. macOS plugin entitlement (#153), then AU editors (G-05). 1 h for the entitlement (needed for the mix row), then 15–25 h.
@@ -177,7 +177,7 @@ mutated and truncated movies. Field reports from the first public week are track
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-30 | trivial | Long takes go on in new files and land whole (#888); readiness estimates unchanged |
+| 2026-10-30 | trivial | Long takes go on in new files and land whole (#888); record to disk dropped from the pre-alpha reasons and the first alpha blocker (done, #84); readiness estimates unchanged |
 | 2026-10-25 | trivial | Progress log: side panels in dock columns; readiness estimates unchanged |
 | 2026-10-25 | trivial | Progress log: Auto Pan stereo balance; readiness estimates unchanged |
 | 2026-10-24 | trivial | Progress log: Clip List Auto Rename; readiness estimates unchanged |

@@ -200,8 +200,8 @@ Weights by what Pro Tools users actually spend time on. **Breadth** = the featur
 platform:
 
 - Tracking from a chosen interface at a chosen buffer size: **no**. Only the default devices are
-  used, the mix runs in fixed 512-sample blocks, input and output are separate streams, and
-  takes are held in RAM.
+  used, the mix runs in fixed 512-sample blocks, and input and output are separate
+  streams.
 - MIDI recording: **no**. There is no MIDI device layer.
 - Session interchange with Pro Tools or picture editors: **no**. No AAF/OMF/`.ptx`.
 
@@ -245,7 +245,7 @@ serializes more, because it needs hands-on testing.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-30 | minor | Performance row: recording goes to disk (#84; long takes continue in a new file, #888); scores unchanged |
+| 2026-10-30 | minor | Performance row and tracking list: recording goes to disk (#84; long takes continue in a new file, #888); scores unchanged |
 | 2026-10-24 | trivial | Built-in plugin counts: 27 processors + 3 instruments on `main`, and 24 + 2 in the 3bc2d92 code snapshot; the sampler (#108) is no longer listed as missing. Percentages unchanged |
 | 2026-10-10 | minor | Readiness-by-audience table: hours to ~95 % for full (950–1,450 h), mainstream (380–600 h) and essentials (110–200 h). The full number is already the additive weighted sum over the written dimension table (40.6 %); method unchanged |
 | 2026-10-10 | minor | Added the mainstream-practitioner (~36 %) and essentials-user (~57 %) numbers with written weights, discounts and user evidence. Checked the full ~40 %: it is the written dimension weights × values (40.6 %), so it doesn't move |
